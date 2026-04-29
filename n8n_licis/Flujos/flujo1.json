@@ -1,0 +1,88 @@
+{
+  "name": "Export mensajes a JSON",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, msg_id, remote_jid, push_name, sender, from_me, message_type, conversation, link_archivo, status, date_time FROM mensajes ORDER BY date_time ASC LIMIT 100;"
+      },
+      "id": "2",
+      "name": "PG Select mensajes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "credentials": {
+        "postgres": {
+          "id": "__REPLACE_WITH_YOUR_CREDENTIAL_ID__",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const rows = items.map(i => i.json);\nreturn [{ json: { data: rows } }];"
+      },
+      "id": "3",
+      "name": "Function empaquetar",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "operation": "jsonToBinary",
+        "dataPropertyName": "data",
+        "fileName": "mensajes_export.json"
+      },
+      "id": "4",
+      "name": "JSON → Binario",
+      "type": "n8n-nodes-base.moveBinaryData",
+      "typeVersion": 1,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "PG Select mensajes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG Select mensajes": {
+      "main": [
+        [
+          {
+            "node": "Function empaquetar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function empaquetar": {
+      "main": [
+        [
+          {
+            "node": "JSON → Binario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

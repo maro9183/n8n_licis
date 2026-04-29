@@ -1,0 +1,154 @@
+{
+  "name": "Chunk Builder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": "everyX",
+        "interval": 10
+      },
+      "id": "1",
+      "name": "Cron cada 10min",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, remote_jid, push_name, sender, date_time, conversation FROM mensajes WHERE conversation IS NOT NULL AND conversation <> '' ORDER BY remote_jid, date_time ASC LIMIT 500;"
+      },
+      "id": "2",
+      "name": "PG Select mensajes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "credentials": {
+        "postgres": {
+          "id": "__REPLACE_WITH_YOUR_CREDENTIAL_ID__",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const SILENCE_MIN = 8 * 60 * 1000; // 8 minutos en ms\nconst MAX_MSGS = 12;\n\nconst chunks = [];\nlet current = null;\n\nfor (const row of items.map(i => i.json)) {\n  if (!current || current.remote_jid !== row.remote_jid) {\n    if (current) chunks.push(current);\n    current = {\n      remote_jid: row.remote_jid,\n      rango_inicio: row.date_time,\n      rango_fin: row.date_time,\n      participantes: new Set([row.push_name || row.sender]),\n      mensajes_ids: [row.id],\n      texto_concatenado: `[${row.date_time} | ${row.push_name}] ${row.conversation}`\n    };\n    continue;\n  }\n\n  const prevTime = new Date(current.rango_fin);\n  const thisTime = new Date(row.date_time);\n  const gap = thisTime - prevTime;\n\n  if (gap >= SILENCE_MIN || current.mensajes_ids.length >= MAX_MSGS) {\n    chunks.push(current);\n    current = {\n      remote_jid: row.remote_jid,\n      rango_inicio: row.date_time,\n      rango_fin: row.date_time,\n      participantes: new Set([row.push_name || row.sender]),\n      mensajes_ids: [row.id],\n      texto_concatenado: `[${row.date_time} | ${row.push_name}] ${row.conversation}`\n    };\n  } else {\n    current.rango_fin = row.date_time;\n    current.participantes.add(row.push_name || row.sender);\n    current.mensajes_ids.push(row.id);\n    current.texto_concatenado += `\\n[${row.date_time} | ${row.push_name}] ${row.conversation}`;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map(c => ({\n  json: {\n    remote_jid: c.remote_jid,\n    rango_inicio: c.rango_inicio,\n    rango_fin: c.rango_fin,\n    participantes: Array.from(c.participantes),\n    mensajes_ids: c.mensajes_ids,\n    texto_concatenado: c.texto_concatenado\n  }\n}));"
+      },
+      "id": "3",
+      "name": "Function agrupar chunks",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chunks (rango_inicio, rango_fin, remote_jid, participantes, mensajes_ids, texto_concatenado) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id;",
+        "additionalFields": {},
+        "values": "={{ [$json[\"rango_inicio\"], $json[\"rango_fin\"], $json[\"remote_jid\"], $json[\"participantes\"], $json[\"mensajes_ids\"], $json[\"texto_concatenado\"] ] }}"
+      },
+      "id": "4",
+      "name": "PG Insert chunk",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [800, 300],
+      "credentials": {
+        "postgres": {
+          "id": "__REPLACE_WITH_YOUR_CREDENTIAL_ID__",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\"input\": $json[\"texto_concatenado\"], \"model\": \"text-embedding-3-small\"}"
+      },
+      "id": "5",
+      "name": "OpenAI Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__REPLACE_WITH_OPENAI_CREDENTIAL_ID__",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://qdrant:6333/collections/wa_chunks/points",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\"points\": [{\"id\": $json[\"id\"] || $json[\"chunk_id\"] || $json[\"rango_inicio\"], \"vector\": $json[\"data\"][0][\"embedding\"], \"payload\": {\"remote_jid\": $json[\"remote_jid\"], \"rango_inicio\": $json[\"rango_inicio\"], \"rango_fin\": $json[\"rango_fin\"], \"participantes\": $json[\"participantes\"], \"mensajes_ids\": $json[\"mensajes_ids\"]}}]}"
+      },
+      "id": "6",
+      "name": "Qdrant Upsert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    }
+  ],
+  "connections": {
+    "Cron cada 10min": {
+      "main": [
+        [
+          {
+            "node": "PG Select mensajes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG Select mensajes": {
+      "main": [
+        [
+          {
+            "node": "Function agrupar chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function agrupar chunks": {
+      "main": [
+        [
+          {
+            "node": "PG Insert chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG Insert chunk": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embedding": {
+      "main": [
+        [
+          {
+            "node": "Qdrant Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

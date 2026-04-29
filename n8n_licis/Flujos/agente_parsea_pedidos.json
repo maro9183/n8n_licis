@@ -1,0 +1,84 @@
+{
+  "name": "Agente IA con Gemini + Memoria + Parser",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "agente-gemini",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook In",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-pro",
+        "prompt": "Sos un agente que interpreta consultas. Dado el texto, devolvé un JSON válido con: fecha_desde, fecha_hasta (ISO 8601 UTC), y tema. Nada más.",
+        "input": "Texto: {{$json[\"body\"]}}"
+      },
+      "id": "2",
+      "name": "Gemini Agent",
+      "type": "n8n-nodes-base.googleGemini",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "credentials": {
+        "googleGeminiApi": "Google Gemini Account"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "fields": {
+          "key": "last_query",
+          "value": "={{$json[\"body\"]}}"
+        }
+      },
+      "id": "3",
+      "name": "Memoria (Data Store)",
+      "type": "n8n-nodes-base.datastore",
+      "typeVersion": 1,
+      "position": [650, 150]
+    },
+    {
+      "parameters": {
+        "functionCode": "let data;\ntry {\n  data = JSON.parse($json[\"content\"]);\n} catch (e) {\n  data = {\n    fecha_desde: \"1970-01-01T00:00:00Z\",\n    fecha_hasta: \"2099-12-31T23:59:59Z\",\n    tema: \"\"\n  };\n}\n\nif (!data.fecha_desde || !data.fecha_hasta) {\n  data.fecha_desde = \"1970-01-01T00:00:00Z\";\n  data.fecha_hasta = \"2099-12-31T23:59:59Z\";\n}\n\nreturn [{ json: data }];"
+      },
+      "id": "4",
+      "name": "Parser/Validator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [700, 300]
+    }
+  ],
+  "connections": {
+    "Webhook In": {
+      "main": [
+        [
+          {
+            "node": "Gemini Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Memoria (Data Store)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Agent": {
+      "main": [
+        [
+          {
+            "node": "Parser/Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

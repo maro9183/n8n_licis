@@ -1,0 +1,179 @@
+name: self-hosted-ai-starter-kit
+
+networks:
+  demo:
+    name: self-hosted-ai-starter-kit_demo
+
+volumes:
+  n8n_storage:
+    name: self-hosted-ai-starter-kit_n8n_storage
+    external: false
+  postgres_storage:
+    name: self-hosted-ai-starter-kit_postgres_storage
+    external: false
+  qdrant_storage:
+    name: self-hosted-ai-starter-kit_qdrant_storage
+    external: true
+  evolution_store:
+    name: self-hosted-ai-starter-kit_evolution_store
+    external: true
+  evolution_instances:
+    name: self-hosted-ai-starter-kit_evolution_instances
+    external: true
+
+# ===== Anchors / plantillas =====
+x-n8n: &service-n8n
+  image: docker.n8n.io/n8nio/n8n:latest
+  platform: linux/amd64
+  networks: ['demo']
+  restart: unless-stopped
+  environment:
+    # --- Base de datos (Postgres) ---
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_PORT=5432
+    - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+
+    # --- Seguridad y experiencia de uso ---
+    - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_PERSONALIZATION_ENABLED=false
+    - N8N_SECURE_COOKIE=false
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+
+    # --- Runners (recomendado) ---
+    - N8N_RUNNERS_ENABLED=true
+
+    # --- Binarios en filesystem (rápido y simple) ---
+    - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+    - N8N_ALLOWED_FILE_SYSTEM_PATHS=/data/shared
+
+    # --- URLs públicas (ajusta host/domino) ---
+    - N8N_PROTOCOL=${N8N_PROTOCOL}
+    - N8N_HOST=${N8N_HOST}
+    - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
+    - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
+
+    # --- Logs y modo de ejecución ---
+    - N8N_LOG_LEVEL=info
+    - NODE_OPTIONS=--trace-uncaught
+    - N8N_COMMUNITY_PACKAGES_ENABLED=true
+    - N8N_UNVERIFIED_PACKAGES_ENABLED=true
+    - N8N_DEFAULT_EXECUTION_MODE=unrestricted
+
+    # --- Poda de ejecuciones (evita DB gigante) ---
+    - EXECUTIONS_DATA_PRUNE=true
+    - EXECUTIONS_DATA_MAX_AGE=90
+    - EXECUTIONS_DATA_HARD_DELETE=true
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    hostname: postgres
+    networks: ['demo']
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # (Opcional) Importar desde JSONs locales; solo descomenta si vas a usarlo.
+  # n8n-import:
+  #   <<: *service-n8n
+  #   hostname: n8n-import
+  #   container_name: n8n-import
+  #   restart: "no"
+  #   entrypoint: /bin/sh
+  #   command:
+  #     - "-c"
+  #     - "n8n import:credentials --separate --input=/demo-data/credentials && n8n import:workflow --separate --input=/demo-data/workflows"
+  #   volumes:
+  #     - ./n8n/demo-data:/demo-data
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+  n8n:
+    <<: *service-n8n
+    hostname: n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - 5678:5678
+    volumes:
+     - n8n_storage:/home/node/.n8n
+     - ./shared:/data/shared
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    dns:
+    - 8.8.8.8
+    - 1.1.1.1
+      # Si activas n8n-import, descomenta estas dos líneas:
+      # n8n-import:
+      #   condition: service_completed_successfully
+    
+
+  evolution_api:
+    image: evoapicloud/evolution-api:latest
+    profiles:
+      - evolution
+    platform: linux/amd64
+    container_name: evolution_api
+    networks: ['demo']
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+      - AUTHENTICATION_API_KEY=CAMBIA-ESTO
+      - SERVER_URL=http://localhost:8080
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=${EVOLUTION_DB_URL}
+      - DATABASE_URL=${EVOLUTION_DB_URL}
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+      - CACHE_REDIS_ENABLED=false
+      - CACHE_LOCAL_ENABLED=true
+      - CONFIG_SESSION_PHONE_VERSION=2.3000.1023204200
+    volumes:
+      - evolution_store:/evolution/store
+      - evolution_instances:/evolution/instances
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles:
+      - evolution
+    container_name: qdrant
+    hostname: qdrant
+    networks: ['demo']
+    restart: unless-stopped
+    ports:
+     - "6333:6333"
+    volumes:
+     - qdrant_storage:/qdrant/storage
+
+  scraper:
+    build: ./scrapers
+    container_name: scraper
+    networks: ['demo']
+    restart: unless-stopped
+    ports:
+      - "${SCRAPER_PORT}:5050"
+    
