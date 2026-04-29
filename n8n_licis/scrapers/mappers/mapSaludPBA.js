@@ -1,6 +1,7 @@
 function mapSaludPBA(item, fecha_consulta) {
   return {
     source: "saludpba",
+    id:`${item.dependencia ?? ""}-${item.anio ?? ""}-${item.numero_orden ?? ""}-${item.llamado ?? ""}`.trim(),
     titulo: item.objeto || item.nombre || "",
     organismo: item.dependencia || item.entidad ||  "Ministerio de Salud PBA",
     unidad_ejecutora: item.dependencia || item.entidad || "",

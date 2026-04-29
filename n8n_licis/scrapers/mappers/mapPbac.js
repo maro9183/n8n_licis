@@ -1,7 +1,7 @@
 function mapPbac(item, fecha_consulta) {
   return {
     source: "pbac",
-
+    id: item.numero_proceso || "",
     titulo: item.nombre_proceso || "",
     organismo: item.unidad_ejecutora || "",
     unidad_ejecutora: "PBAC",
