@@ -1,13 +1,16 @@
 function mapScba(item, fecha_consulta) {
+  const departamento = item.departamento || "S/D";
+  const numero = item.numero || "";
+  
   return {
-    id: item.numero || "",
+    id: `${departamento}-${numero}`,
     source: "scba",
     titulo: item.detalle || "",
-    organismo: item.departamento || "SUPREMA CORTE",
+    organismo: departamento,
     unidad_ejecutora: "SCBA",
     fecha_apertura: item.apertura || "",
-    numero_proceso: item.numero || "",
-    tipo_proceso: item.numero ? (item.numero.split(' ')[0]) : "",
+    numero_proceso: numero,
+    tipo_proceso: numero ? (numero.split(' ')[0]) : "",
     estado: item.resuelto || "",
     monto: null,
     url: item.url || "",
